@@ -5748,6 +5748,12 @@
 { oid => '2015', descr => 'trim both ends of string',
   proname => 'btrim', prorettype => 'bytea', proargtypes => 'bytea bytea',
   prosrc => 'byteatrim' },
+{ oid => '9612', descr => 'trim left end of string',
+  proname => 'ltrim', prorettype => 'bytea', proargtypes => 'bytea bytea',
+  prosrc => 'bytealtrim' },
+{ oid => '9613', descr => 'trim right end of string',
+  proname => 'rtrim', prorettype => 'bytea', proargtypes => 'bytea bytea',
+  prosrc => 'byteartrim' },
 
 { oid => '2019', descr => 'convert timestamp with time zone to time',
   proname => 'time', provolatile => 's', prorettype => 'time',
