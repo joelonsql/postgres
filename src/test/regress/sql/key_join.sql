@@ -859,7 +859,8 @@ RIGHT JOIN t2_nn FOR KEY t1_nn (t1_id) <- t2_nn (t2_t1_id_nullable);
 -- N5: Nullable FK, FULL JOIN → accepted
 SELECT * FROM t2_nn
 -- accepted
-FULL JOIN t1_nn FOR KEY t2_nn (t2_t1_id_nullable) -> t1_nn (t1_id);
+FULL JOIN t1_nn FOR KEY t2_nn (t2_t1_id_nullable) -> t1_nn (t1_id)
+ORDER BY t2_id NULLS LAST, t1_id;
 
 -- N7: Nullable FK, LEFT JOIN but referencing on inner side → error
 SELECT * FROM t1_nn
