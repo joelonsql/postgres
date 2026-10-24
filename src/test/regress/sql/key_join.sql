@@ -950,6 +950,69 @@ SELECT * FROM t1 JOIN t2 FOR KEY t1 (c1, c2) <- t1 (c3, c4);
 CREATE SCHEMA key_join_alias_ambiguous;
 CREATE TABLE key_join_alias_ambiguous.t1 (c1 int PRIMARY KEY);
 
+-- Schema-qualified references work in both directions and can be mixed with
+-- unqualified references.  Qualification does not require a search_path entry.
+SELECT public.t1.c1, public.t2.c3
+FROM public.t1 JOIN public.t2
+  FOR KEY public.t1 (c1) <- public.t2 (c3)
+ORDER BY public.t1.c1;
+
+SELECT public.t2.c3, public.t1.c1
+FROM public.t2 JOIN public.t1
+  FOR KEY public.t2 (c3) -> public.t1 (c1)
+ORDER BY public.t2.c3;
+
+SELECT public.t2.c3, public.t1.c1
+FROM public.t2 JOIN public.t1
+  FOR KEY t2 (c3) -> public.t1 (c1)
+ORDER BY public.t2.c3;
+
+-- Aliases replace the original table names, even when the alias is identical
+-- to the unqualified table name.
+SELECT c.c3, p.c1
+FROM public.t2 AS c JOIN public.t1 AS p
+  FOR KEY c (c3) -> p (c1)
+ORDER BY c.c3;
+
+-- FOR KEY endpoints are references to operands, not new FROM relations or
+-- recursive CTE dependencies, even when an alias has the CTE's name.
+WITH RECURSIVE alias_cte AS (
+  SELECT alias_cte.c3
+  FROM public.t2 AS alias_cte JOIN public.t1 AS p
+    FOR KEY alias_cte (c3) -> p (c1)
+)
+SELECT * FROM alias_cte ORDER BY c3;
+
+-- rejected, reason: the left relation's alias hides its qualified name
+SELECT * FROM public.t2 AS c JOIN public.t1
+  FOR KEY public.t2 (c3) -> public.t1 (c1);
+
+-- rejected, reason: the right relation's alias hides its qualified name
+SELECT * FROM public.t2 JOIN public.t1 AS p
+  FOR KEY public.t2 (c3) -> public.t1 (c1);
+
+-- rejected, reason: an explicit alias cannot be schema-qualified
+SELECT * FROM public.t2 AS t2 JOIN public.t1
+  FOR KEY public.t2 (c3) -> public.t1 (c1);
+
+-- rejected, reason: the qualified relation is not in the named operand
+SELECT * FROM public.t2 JOIN public.t1
+  FOR KEY public.t2 (c3) -> key_join_alias_ambiguous.t1 (c1);
+
+-- rejected, reason: the endpoint schema does not exist
+SELECT * FROM public.t2 JOIN public.t1
+  FOR KEY key_join_missing_schema.t2 (c3) -> public.t1 (c1);
+
+-- rejected, reason: cross-database references are not supported
+SELECT * FROM public.t2 JOIN public.t1
+  FOR KEY key_join_other_database.public.t2 (c3) -> public.t1 (c1);
+
+-- rejected, reason: qualification does not allow naming the opposite operand
+SELECT * FROM public.t2 JOIN public.t1
+  FOR KEY public.t1 (c3) -> public.t1 (c1);
+SELECT * FROM public.t2 JOIN public.t1
+  FOR KEY public.t2 (c3) -> public.t2 (c1);
+
 -- rejected, reason: left table reference matches two visible left-operand relations
 SELECT *
 FROM public.t1 CROSS JOIN key_join_alias_ambiguous.t1
@@ -960,7 +1023,69 @@ SELECT *
 FROM t2
 JOIN (public.t1 CROSS JOIN key_join_alias_ambiguous.t1) FOR KEY t2 (c3) -> t1 (c1);
 
+-- Qualification distinguishes equal relation names within either operand.
+-- The different FK values make selection of the wrong relation observable.
+CREATE TABLE key_join_alias_ambiguous.t2
+  (c3 int PRIMARY KEY REFERENCES public.t1 (c1),
+   original_key int NOT NULL UNIQUE REFERENCES public.t2 (c3));
+INSERT INTO key_join_alias_ambiguous.t2 VALUES (2, 1);
+
+SELECT public.t2.c3, public.t1.c1
+FROM public.t2 JOIN key_join_alias_ambiguous.t2
+  FOR KEY public.t2 (c3) <- key_join_alias_ambiguous.t2 (original_key)
+JOIN public.t1 FOR KEY public.t2 (c3) -> public.t1 (c1)
+ORDER BY public.t2.c3;
+
+SELECT public.t2.c3, public.t1.c1
+FROM public.t2 JOIN key_join_alias_ambiguous.t2
+  FOR KEY public.t2 (c3) <- key_join_alias_ambiguous.t2 (original_key)
+JOIN public.t1 FOR KEY key_join_alias_ambiguous.t2 (c3) -> public.t1 (c1)
+ORDER BY public.t2.c3;
+
+SELECT public.t1.c1, public.t2.c3
+FROM public.t1
+JOIN (public.t2 JOIN key_join_alias_ambiguous.t2
+        FOR KEY public.t2 (c3) <- key_join_alias_ambiguous.t2 (original_key))
+  FOR KEY public.t1 (c1) <- public.t2 (c3)
+ORDER BY public.t1.c1;
+
+-- rejected, reason: a join alias hides its members' qualified names
+SELECT *
+FROM (public.t2 CROSS JOIN key_join_alias_ambiguous.t2) AS j
+JOIN public.t1 FOR KEY public.t2 (c3) -> public.t1 (c1);
+
+-- Stored views must deparse to an unambiguous, reparsable query even when
+-- another schema's equal relation names precede the originals in search_path.
+CREATE VIEW v_key_join_qualified AS
+SELECT public.t2.c3 AS child_key, public.t1.c1 AS parent_key
+FROM public.t2 JOIN key_join_alias_ambiguous.t2
+  FOR KEY public.t2 (c3) <- key_join_alias_ambiguous.t2 (original_key)
+JOIN public.t1 FOR KEY key_join_alias_ambiguous.t2 (c3) -> public.t1 (c1);
+SET search_path = key_join_alias_ambiguous, public;
+SELECT pg_get_viewdef('public.v_key_join_qualified'::regclass, true);
+DO $$
+BEGIN
+  EXECUTE 'CREATE VIEW public.v_key_join_qualified_reparsed AS ' ||
+    pg_get_viewdef('public.v_key_join_qualified'::regclass, true);
+END
+$$;
+SELECT * FROM public.v_key_join_qualified ORDER BY child_key;
+SELECT * FROM public.v_key_join_qualified_reparsed ORDER BY child_key;
+RESET search_path;
+DROP VIEW v_key_join_qualified, v_key_join_qualified_reparsed;
+
 DROP SCHEMA key_join_alias_ambiguous CASCADE;
+
+-- Quoted identifiers, including embedded dots, retain their identity.
+CREATE SCHEMA "key_join.qualified";
+CREATE TABLE "key_join.qualified"."child.table"
+  (parent_id int PRIMARY KEY REFERENCES public.t1 (c1));
+INSERT INTO "key_join.qualified"."child.table" VALUES (2);
+SELECT public.t1.c1
+FROM "key_join.qualified"."child.table" JOIN public.t1
+  FOR KEY "key_join.qualified"."child.table" (parent_id) -> public.t1 (c1);
+DROP TABLE "key_join.qualified"."child.table";
+DROP SCHEMA "key_join.qualified";
 
 -- rejected, reason: referencing and referenced column counts differ
 SELECT * FROM t1 JOIN t2 FOR KEY t1 (c1) <- t2 (c3, c4);

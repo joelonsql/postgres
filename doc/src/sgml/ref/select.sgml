@@ -721,7 +721,9 @@ TABLE [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ]
         class="parameter">from_item</replaceable>, and <replaceable
         class="parameter">right_from_reference</replaceable> one visible in
         the right-hand <replaceable class="parameter">from_item</replaceable>;
-        a table name, or its alias if one was given.  Each column list names
+        a table name, optionally schema-qualified, or its alias if one was
+        given.  An alias hides the original table name, including its
+        schema-qualified form.  Each column list names
         columns exposed by the relation it follows.  The arrow points from
         the referencing side to the referenced side: with
         <literal>-&gt;</literal>, the left-hand columns are the referencing

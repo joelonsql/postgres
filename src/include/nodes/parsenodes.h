@@ -2276,9 +2276,11 @@ typedef struct JsonArrayAgg
  * and the matching "<-" form, used as the condition of a JOIN.  The name
  * before the arrow must identify a table reference visible inside the JOIN's
  * left operand and the name after it one visible inside the right operand.
- * Each column list resolves against the reference it follows.  The arrow
- * points from the referencing side to the referenced side, so "->" makes the
- * left operand the referencing side and "<-" the right operand.
+ * References can be schema-qualified relation names, or unqualified names
+ * including aliases.  Each column list resolves against the reference it
+ * follows.  The arrow points from the referencing side to the referenced
+ * side, so "->" makes the left operand the referencing side and "<-" the
+ * right operand.
  *
  * Transformed into a KeyJoinNode during parse analysis once the referencing
  * and referenced columns and the underlying foreign-key constraint have been
@@ -2287,12 +2289,10 @@ typedef struct JsonArrayAgg
 typedef struct KeyJoinClause
 {
 	NodeTag		type;
-	char	   *leftRef;		/* table reference inside the left operand */
-	ParseLoc	leftRefLocation;	/* location of leftRef, or -1 */
+	RangeVar   *leftRef;		/* table reference inside the left operand */
 	List	   *leftCols;		/* column names to resolve with leftRef */
 	KeyJoinDirection direction; /* arrow direction; selects which side is FK */
-	char	   *rightRef;		/* table reference inside the right operand */
-	ParseLoc	rightRefLocation;	/* location of rightRef, or -1 */
+	RangeVar   *rightRef;		/* table reference inside the right operand */
 	List	   *rightCols;		/* column names to resolve with rightRef */
 	ParseLoc	location;		/* location of the FOR KEY token, or -1 */
 } KeyJoinClause;

@@ -4278,6 +4278,10 @@ raw_expression_tree_walker_impl(Node *node,
 			{
 				KeyJoinClause *kjc = (KeyJoinClause *) node;
 
+				/*
+				 * Do not walk the RangeVars: they name existing FROM items,
+				 * not new relations or CTE dependencies.
+				 */
 				if (WALK(kjc->leftCols))
 					return true;
 				return WALK(kjc->rightCols);

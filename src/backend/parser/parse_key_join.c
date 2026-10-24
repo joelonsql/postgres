@@ -35,6 +35,7 @@
 #include "catalog/dependency.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
+#include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_inherits.h"
@@ -42,6 +43,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "lib/stringinfo.h"
+#include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/parsenodes.h"
@@ -243,9 +245,8 @@ static void add_inactive_projected(KeyJoinSurfaceFacts *dst, KeyJoinFact *old,
 
 static ParseNamespaceItem *lookup_key_join_table_ref(ParseState *pstate,
 													 List *namespace,
-													 const char *refname,
-													 bool leftside,
-													 ParseLoc location);
+													 RangeVar *ref,
+													 bool leftside);
 static KeyJoinColumn *resolve_columns_on_nsitem(ParseState *pstate,
 												ParseNamespaceItem *lookup,
 												ParseNamespaceItem *surface,
@@ -415,13 +416,11 @@ transformAndValidateKeyJoin(ParseState *pstate, JoinExpr *j,
 				 errmsg("key join column lists must have the same length"),
 				 parser_errposition(pstate, key_clause->location)));
 
-	/* Each key-join alias must name exactly one visible relation. */
+	/* Each key-join reference must name exactly one visible relation. */
 	left_nsitem = lookup_key_join_table_ref(pstate, l_namespace,
-											key_clause->leftRef, true,
-											key_clause->leftRefLocation);
+											key_clause->leftRef, true);
 	right_nsitem = lookup_key_join_table_ref(pstate, r_namespace,
-											 key_clause->rightRef, false,
-											 key_clause->rightRefLocation);
+											 key_clause->rightRef, false);
 
 	left_cols = resolve_columns_on_nsitem(pstate, left_nsitem, l_nsitem,
 										  key_clause->leftCols,
@@ -511,22 +510,58 @@ transformAndValidateKeyJoin(ParseState *pstate, JoinExpr *j,
  *		Resolve a FOR KEY table reference within one join operand.
  *
  *		The namespace holds every table reference visible inside that
- *		operand, matched by exposed name (alias or bare relation name).
- *		There is no schema-qualified form.  See the join_qual comment in
- *		gram.y.
+ *		operand.  As in refnameNamespaceItem, unqualified names match an
+ *		exposed alias or bare relation name, while qualified names match an
+ *		unaliased relation by OID.  Search only this operand, not the whole
+ *		query namespace or any outer query level.
  */
 static ParseNamespaceItem *
 lookup_key_join_table_ref(ParseState *pstate, List *namespace,
-						  const char *refname, bool leftside,
-						  ParseLoc location)
+						  RangeVar *ref, bool leftside)
 {
 	ParseNamespaceItem *result = NULL;
+	Oid			relid = InvalidOid;
+	const char *refname = ref->relname;
+	ParseLoc	location = ref->location;
+
+	/* A catalog qualification may only name the current database. */
+	if (ref->catalogname &&
+		strcmp(ref->catalogname, get_database_name(MyDatabaseId)) != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("cross-database references are not implemented: \"%s.%s.%s\"",
+						ref->catalogname, ref->schemaname, ref->relname),
+				 parser_errposition(pstate, location)));
+
+	if (ref->schemaname)
+	{
+		Oid			namespaceid;
+
+		/*
+		 * Match existing RTEs, without checking schema permissions again or
+		 * reporting a separate error for a nonexistent schema or relation.
+		 * See refnameNamespaceItem.
+		 */
+		namespaceid = LookupNamespaceNoError(ref->schemaname);
+		if (OidIsValid(namespaceid))
+			relid = get_relname_relid(ref->relname, namespaceid);
+		refname = quote_qualified_identifier(ref->schemaname, ref->relname);
+	}
 
 	foreach_ptr(ParseNamespaceItem, nsitem, namespace)
 	{
+		RangeTblEntry *rte = nsitem->p_rte;
+
 		Assert(nsitem->p_names != NULL);
-		if (!nsitem->p_rel_visible ||
-			strcmp(nsitem->p_names->aliasname, refname) != 0)
+		if (!nsitem->p_rel_visible)
+			continue;
+		if (ref->schemaname)
+		{
+			if (!OidIsValid(relid) || rte->rtekind != RTE_RELATION ||
+				rte->relid != relid || rte->alias != NULL)
+				continue;
+		}
+		else if (strcmp(nsitem->p_names->aliasname, ref->relname) != 0)
 			continue;
 		if (result != NULL)
 			ereport(ERROR,

@@ -14202,11 +14202,10 @@ opt_outer: OUTER_P
  *						  The arrow points from the referencing one to
  *						  the referenced one.
  *
- * A FOR KEY table reference is a plain ColId, matched against the names
- * exposed by the operand.  The standard also admits a schema-qualified table
- * name there and column references accept schema.table.column.  Our FOR KEY
- * does neither, so a schema-qualified relation is named by its bare name or
- * alias.
+ * A FOR KEY table reference can be an unqualified name or a schema-qualified
+ * relation name.  Parse analysis matches it against the references exposed
+ * by the operand, using the same qualification and alias rules as column
+ * references.
  *
  * We return USING as a two-element List (the first item being a sub-List
  * of the common column names, and the second either an Alias item or NULL).
@@ -14222,7 +14221,7 @@ join_qual: USING '(' name_list ')' opt_alias_clause_for_join_using
 				{
 					$$ = $2;
 				}
-			| FOR KEY ColId '(' name_list ')' '<' '-' ColId '(' name_list ')'
+			| FOR KEY qualified_name '(' name_list ')' '<' '-' qualified_name '(' name_list ')'
 				{
 					KeyJoinClause *n = makeNode(KeyJoinClause);
 
@@ -14237,16 +14236,14 @@ join_qual: USING '(' name_list ')' opt_alias_clause_for_join_using
 								 parser_errposition(@7)));
 
 					n->leftRef = $3;
-					n->leftRefLocation = @3;
 					n->leftCols = $5;
 					n->direction = KEY_JOIN_LEFT_ARROW;
 					n->rightRef = $9;
-					n->rightRefLocation = @9;
 					n->rightCols = $11;
 					n->location = @1;
 					$$ = (Node *) n;
 				}
-			| FOR KEY ColId '(' name_list ')' Op ColId '(' name_list ')'
+			| FOR KEY qualified_name '(' name_list ')' Op qualified_name '(' name_list ')'
 				{
 					KeyJoinClause *n = makeNode(KeyJoinClause);
 
@@ -14258,11 +14255,9 @@ join_qual: USING '(' name_list ')' opt_alias_clause_for_join_using
 								 parser_errposition(@7)));
 
 					n->leftRef = $3;
-					n->leftRefLocation = @3;
 					n->leftCols = $5;
 					n->direction = KEY_JOIN_RIGHT_ARROW;
 					n->rightRef = $8;
-					n->rightRefLocation = @8;
 					n->rightCols = $10;
 					n->location = @1;
 					$$ = (Node *) n;

@@ -400,8 +400,10 @@ FROM <replaceable>table_reference</replaceable> <optional>, <replaceable>table_r
         arrow must be a relation visible from <replaceable>T1</replaceable>
         and the one after the arrow a relation visible from
         <replaceable>T2</replaceable>; each column list names columns of the
-        relation it follows.  The arrow always points from the referencing
-        columns toward the referenced columns.  With
+        relation it follows.  An unaliased table can be named with schema
+        qualification; when an alias is given, that alias must be used.
+        The arrow always points from the referencing columns toward the
+        referenced columns.  With
         <literal>-&gt;</literal>, the <replaceable>T1</replaceable> columns are
         the referencing foreign-key columns and the
         <replaceable>T2</replaceable> columns are the referenced key columns.
